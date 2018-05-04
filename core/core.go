@@ -42,6 +42,7 @@ import (
 	nilrouting "gx/ipfs/QmNXy5XekdHwNSe2sPf5fYM3jgqZmpfMfbsc6LAvKyq4Uj/go-ipfs-routing/none"
 	offroute "gx/ipfs/QmNXy5XekdHwNSe2sPf5fYM3jgqZmpfMfbsc6LAvKyq4Uj/go-ipfs-routing/offline"
 	u "gx/ipfs/QmNiJuT8Ja3hMVpBHXv3Q6dwmperaQ6JjLtpMQgMCD7xvx/go-ipfs-util"
+	record "gx/ipfs/QmQwX28FRHWNvzokHFfgjpDFzFqCYXQ2nj9uwyUFNHLU4G/go-libp2p-record"
 	swarm "gx/ipfs/QmRqfgh56f8CrqpwH7D2s6t8zQRsvPoftT3sp5Y6SUhNA3/go-libp2p-swarm"
 	goprocess "gx/ipfs/QmSF8fPo3jgVBAy8fpdjjYqgG87dkJgUprRBHRd2tmfgpP/goprocess"
 	pnet "gx/ipfs/QmSGoP33Ufev1UDsUuHco8rfhVTzxfq6smXhwhN16c5CWd/go-libp2p-pnet"
@@ -49,7 +50,7 @@ import (
 	logging "gx/ipfs/QmTG23dvpBCBjqQwyDxV8CQT6jmS4PSftNr1VqHhE3MLy7/go-log"
 	addrutil "gx/ipfs/QmTGSre9j1otFgsr1opCUQDXTPSM6BTZnMWwPeA5nYJM7w/go-addr-util"
 	routing "gx/ipfs/QmUHRKTeaoASDvDj7cTAXsmjAY7KQ13ErtzkQHZQq6uFUz/go-libp2p-routing"
-	dht "gx/ipfs/QmUREysb67uJYX4nMKAUQQWj8AUMavqwP9xbpmQ7V7Fayr/go-libp2p-kad-dht"
+	psrouter "gx/ipfs/QmUPeyRMUpSG4fML7CDfqKDfUxqqSWinXHVQLZdCMRPPU5/go-libp2p-pubsub-router"
 	floodsub "gx/ipfs/QmVKrsEgixRtMWcMd6WQzuwqCUC3jfLf7Q7xcjnKoMMikS/go-libp2p-floodsub"
 	mssmux "gx/ipfs/QmVniQJkdzLZaZwzwMdd3dJTvWiJ1DQEkreVy6hs6h7Vk5/go-smux-multistream"
 	metrics "gx/ipfs/QmVvu4bS5QLfS19ePkp5Wgzn2ZUma5oXTT9BgDFyQLxUZF/go-libp2p-metrics"
@@ -70,8 +71,11 @@ import (
 	pstore "gx/ipfs/QmdeiKhUy1TVGBaKxt7y1QmBDLBdisSrLJ1x58Eoj4PXUh/go-libp2p-peerstore"
 	ic "gx/ipfs/Qme1knMqwt1hKZbc1BmQFmnm9f36nyQGwXxPGVpVJ9rMK5/go-libp2p-crypto"
 	ipld "gx/ipfs/Qme5bWv7wtjUNGsK2BNGVUFPKiuxWrsqrtvYwCLRw8YFES/go-ipld-format"
+	dht "gx/ipfs/QmeYRWbgGJGQxdyqSCYqyMKdrcpjgZP3PTGbWAfLVZAxfn/go-libp2p-kad-dht"
+	dhtopts "gx/ipfs/QmeYRWbgGJGQxdyqSCYqyMKdrcpjgZP3PTGbWAfLVZAxfn/go-libp2p-kad-dht/opts"
 	ds "gx/ipfs/QmeiCcJfDW1GJnWUArudsv5rQsihpi4oyddPhdqo3CfX6i/go-datastore"
 	mplex "gx/ipfs/QmenmFuirGzv8S1R3DyvbZ6tFmQapkGeDCebgYzni1Ntn3/go-smux-multiplex"
+	rhelpers "gx/ipfs/QmeoG1seQ8a9b2vS3XJ8HPz9tXr6dzpS5NizjuDDSntQEk/go-libp2p-routing-helpers"
 	mafilter "gx/ipfs/Qmf2UAmRwDG4TvnkQpHZWPAzw7rpCYVhxmRXmYxXr5LD1g/go-maddr-filter"
 	ifconnmgr "gx/ipfs/QmfQNieWBPwmnUjXWPZbjJPzhNwFFabTb5RQ79dyVWGujQ/go-libp2p-interface-connmgr"
 	p2phost "gx/ipfs/QmfZTdmunzKzAGJrSvXXQbQ5kLLUiEMX5vdwux7iXkdk7D/go-libp2p-host"
@@ -135,6 +139,7 @@ type IpfsNode struct {
 	IpnsRepub    *ipnsrp.Republisher
 
 	Floodsub *floodsub.PubSub
+	PSRouter *psrouter.PubsubValueStore
 	P2P      *p2p.P2P
 
 	proc goprocess.Process
@@ -240,28 +245,13 @@ func (n *IpfsNode) startOnlineServices(ctx context.Context, routingOption Routin
 		return err
 	}
 
-	if err := n.startOnlineServicesWithHost(ctx, peerhost, routingOption); err != nil {
+	if err := n.startOnlineServicesWithHost(ctx, peerhost, routingOption, pubsub, ipnsps); err != nil {
 		return err
 	}
 
 	// Ok, now we're ready to listen.
 	if err := startListening(n.PeerHost, cfg); err != nil {
 		return err
-	}
-
-	if pubsub || ipnsps {
-		service, err := floodsub.NewFloodSub(ctx, peerhost)
-		if err != nil {
-			return err
-		}
-		n.Floodsub = service
-	}
-
-	if ipnsps {
-		err = namesys.AddPubsubNameSystem(ctx, n.Namesys, n.PeerHost, n.Routing, n.Repo.Datastore(), n.Floodsub)
-		if err != nil {
-			return err
-		}
 	}
 
 	n.P2P = p2p.NewP2P(n.Identity, n.PeerHost, n.Peerstore)
@@ -437,16 +427,49 @@ func (n *IpfsNode) HandlePeerFound(p pstore.PeerInfo) {
 
 // startOnlineServicesWithHost  is the set of services which need to be
 // initialized with the host and _before_ we start listening.
-func (n *IpfsNode) startOnlineServicesWithHost(ctx context.Context, host p2phost.Host, routingOption RoutingOption) error {
+func (n *IpfsNode) startOnlineServicesWithHost(ctx context.Context, host p2phost.Host, routingOption RoutingOption, pubsub bool, ipnsps bool) error {
 	// setup diagnostics service
 	n.Ping = ping.NewPingService(host)
 
+	if pubsub || ipnsps {
+		service, err := floodsub.NewFloodSub(ctx, host)
+		if err != nil {
+			return err
+		}
+		n.Floodsub = service
+	}
+
+	validator := record.NamespacedValidator{
+		"pk":   record.PublicKeyValidator{},
+		"ipns": namesys.IpnsValidator{KeyBook: host.Peerstore()},
+	}
+
 	// setup routing service
-	r, err := routingOption(ctx, host, n.Repo.Datastore())
+	r, err := routingOption(ctx, host, n.Repo.Datastore(), validator)
 	if err != nil {
 		return err
 	}
 	n.Routing = r
+
+	if ipnsps {
+		n.PSRouter = psrouter.NewPubsubValueStore(
+			ctx,
+			host,
+			n.Routing,
+			n.Floodsub,
+			validator,
+		)
+		n.Routing = rhelpers.Tiered{
+			// Always check pubsub first.
+			&rhelpers.Compose{
+				ValueStore: &rhelpers.LimitedValueStore{
+					ValueStore: n.PSRouter,
+					Namespaces: []string{"ipns"},
+				},
+			},
+			n.Routing,
+		}
+	}
 
 	// Wrap standard peer host with routing system to allow unknown peer lookups
 	n.PeerHost = rhost.Wrap(host, n.Routing)
@@ -946,21 +969,24 @@ func startListening(host p2phost.Host, cfg *config.Config) error {
 	return nil
 }
 
-func constructDHTRouting(ctx context.Context, host p2phost.Host, dstore ds.Batching) (routing.IpfsRouting, error) {
-	dhtRouting := dht.NewDHT(ctx, host, dstore)
-	dhtRouting.Validator[IpnsValidatorTag] = namesys.NewIpnsRecordValidator(host.Peerstore())
-	dhtRouting.Selector[IpnsValidatorTag] = namesys.IpnsSelectorFunc
-	return dhtRouting, nil
+func constructDHTRouting(ctx context.Context, host p2phost.Host, dstore ds.Batching, validator record.Validator) (routing.IpfsRouting, error) {
+	return dht.New(
+		ctx, host,
+		dhtopts.Datastore(dstore),
+		dhtopts.Validator(validator),
+	)
 }
 
-func constructClientDHTRouting(ctx context.Context, host p2phost.Host, dstore ds.Batching) (routing.IpfsRouting, error) {
-	dhtRouting := dht.NewDHTClient(ctx, host, dstore)
-	dhtRouting.Validator[IpnsValidatorTag] = namesys.NewIpnsRecordValidator(host.Peerstore())
-	dhtRouting.Selector[IpnsValidatorTag] = namesys.IpnsSelectorFunc
-	return dhtRouting, nil
+func constructClientDHTRouting(ctx context.Context, host p2phost.Host, dstore ds.Batching, validator record.Validator) (routing.IpfsRouting, error) {
+	return dht.New(
+		ctx, host,
+		dhtopts.Client(true),
+		dhtopts.Datastore(dstore),
+		dhtopts.Validator(validator),
+	)
 }
 
-type RoutingOption func(context.Context, p2phost.Host, ds.Batching) (routing.IpfsRouting, error)
+type RoutingOption func(context.Context, p2phost.Host, ds.Batching, record.Validator) (routing.IpfsRouting, error)
 
 type DiscoveryOption func(context.Context, p2phost.Host) (discovery.Service, error)
 
