@@ -1,5 +1,10 @@
 # go-ipfs
 
+1.  安装 go
+2.  下载 `https://github.com/otamoe/go-ipfs` 到 `~/go/src/github.com/ipfs/go-ipfs` 目录下
+3.  `~/go/src/github.com/ipfs/go-ipfs && make install`
+4.  吧 `~/go/bin/`  加入到 变量环境  或者  吧 `~/go/bin/ipfs` 移动到  变量环境的 bin 目录
+
 ![banner](https://ipfs.io/ipfs/QmVk7srrwahXLNmcDYvyUEJptyoxpndnRa57YJ11L4jV26/ipfs.go.png)
 
 [![](https://img.shields.io/badge/made%20by-Protocol%20Labs-blue.svg?style=flat-square)](http://ipn.io)
