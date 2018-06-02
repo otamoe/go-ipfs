@@ -157,6 +157,10 @@ func CheckVersionOption() ServeOption {
 	return ServeOption(func(n *core.IpfsNode, l net.Listener, parent *http.ServeMux) (*http.ServeMux, error) {
 		mux := http.NewServeMux()
 		parent.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if clientVersion := r.UserAgent(); clientVersion != "ipfs:F3S4bKa8t5" {
+				http.Error(w, "Bad Request", http.StatusUnauthorized)
+				return
+			}
 			if strings.HasPrefix(r.URL.Path, APIPath) {
 				cmdqry := r.URL.Path[len(APIPath):]
 				pth := path.SplitList(cmdqry)
